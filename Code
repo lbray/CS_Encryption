@@ -1,0 +1,211 @@
+// if you want to use a password file rather than have the user enter a password just uncomment the "#define passFile" line
+
+//#define passFile
+                  
+
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Reflection;
+using System.Drawing;
+using System.Collections;
+using System.ComponentModel;
+using System.Windows.Forms;
+using System.Data;
+
+namespace DEScrypt
+{ 
+	class Class1
+	{
+		static PasswordDeriveBytes pdb;
+		[STAThread]
+
+		static void Main(string[] args)
+		{
+			string filePassed;
+			string fileReturned;
+			string pass;
+			bool encrypt = true;
+
+			if (args.Length < 1)
+				return;  //no file passed
+
+			//get the application running path (app & pw.dat are in same location)
+			System.Reflection.Module[] modules = System.Reflection.Assembly.GetExecutingAssembly().GetModules(); string aPath = System.IO.Path.GetDirectoryName (modules[0].FullyQualifiedName); if ((aPath != "") && (aPath[aPath.Length-1] != '\\')) aPath += '\\'; //return aPath;
+#if passFile  //have password file, no prompting
+			FileStream fs = new FileStream(aPath + "pw.dat",FileMode.Open);
+			StreamReader r = new StreamReader(fs, Encoding.UTF8);
+			pass = r.ReadLine(); //now we have the password
+			r.Close();
+			fs.Close();
+#else  //prompt for password, no password file
+			frmPassword.frmPasswordResult result = frmPassword.Show("Enter Password:","Password","");
+			if (result.OK) 
+			{
+				pass = result.Text;
+			}
+			else
+			{
+				return; //password not entered
+			}
+#endif
+			for (int i = 0; i < args.Length; i++)
+			{ //start processing arguments (files) one at a time until finished
+				filePassed = args[i]; //assigns individual file names
+				int fpexti = filePassed.Length - 3;  
+				string fpexts = filePassed.Substring(fpexti,3);
+				pdb = new PasswordDeriveBytes(pass, 
+					new byte[] {0x49, 0x76, 0x61, 0x6e, 0x20, 0x4d, 0x65, 0x64, 0x76, 0x65, 0x64, 0x65, 0x76}); 
+				//now we have key to encrypt or decrypt files (pdb)
+
+				if (fpexts == "cry")
+					encrypt = false;
+				if (encrypt == true) //encrypt
+				{
+					fileReturned = filePassed + ".cry";
+					try {Encrypt(filePassed, fileReturned);}
+					catch { return; }
+					ShredFile(filePassed);
+					File.Delete(filePassed);
+				}
+				else  //decrypt
+				{
+					fileReturned = filePassed.Replace(".cry","");
+					try { Decrypt(filePassed, fileReturned); }
+					catch { return; } //probably hack attempt
+				}
+			} //ends processing individual files passed as arguments
+		}
+
+
+		//this is where we overwrite the source file before deleting it after encryption.
+		static void ShredFile(string delFile)
+		{
+		FileStream fs;
+		BinaryWriter w;
+
+			try 
+			{
+				fs = new FileStream(delFile, FileMode.Open, FileAccess.ReadWrite);
+				w = new BinaryWriter(fs);
+				while(fs.Length != fs.Position)
+				{
+					if (fs.Length == fs.Position) //just as a double check
+						break;
+					w.Write("X");
+				}
+				w.Flush();
+				w.Close();
+				fs.Flush();
+				fs.Close();
+			}
+			catch {return;}
+		}
+
+		static void Encrypt(string in_filename,string out_filename)
+		{
+			
+			FileStream ifs,ofs;
+			try
+			{
+				//Creating an input file stream
+				ifs  = new FileStream(in_filename,FileMode.Open,FileAccess.Read);
+				//Creating an output file stream
+				ofs  = new FileStream(out_filename,FileMode.Create,FileAccess.Write);
+				ofs.SetLength(0);
+			}
+			catch (Exception ex)
+			{
+				throw new ApplicationException("File Error:" , ex );
+			}
+			
+			byte[] inputByte = new byte[4096]; //Intermediate buffer.
+			long writtenLen = 0;               //Total number of written bytes.
+			long fileLen = ifs.Length;         //Total length of the input file.
+			int len; 
+		
+			DES des = new DESCryptoServiceProvider();          
+			CryptoStream encStream = new CryptoStream(ofs, des.CreateEncryptor(pdb.GetBytes(des.KeySize/8),pdb.GetBytes(des.BlockSize/8)),
+				CryptoStreamMode.Write);
+                
+			Console.WriteLine("Encryption in progress ...");
+ 
+			//Read from the input file, then encrypt and write to the output file.
+			try
+			{
+				while(writtenLen < fileLen)
+				{
+					len = ifs.Read(inputByte, 0, 4096);
+					encStream.Write(inputByte, 0, len);
+					writtenLen += len;
+				}
+			}
+			catch (Exception ex)
+			{
+				throw new ApplicationException("Write Error:" , ex);
+			}
+			Console.WriteLine("{0} bytes successfully processed", writtenLen);
+
+			encStream.Close();  
+			ifs.Close();
+			ofs.Close();
+
+		} // End of Encrypt.
+
+		static void Decrypt(string in_filename,string out_filename)
+		{
+			FileStream ifs,ofs;
+			try
+			{
+				//Creating an input file stream
+				ifs  = new FileStream(in_filename,FileMode.Open,FileAccess.Read);
+                	
+				//Creating an output file stream
+				ofs  = new FileStream(out_filename,FileMode.Create,FileAccess.ReadWrite);
+				ofs.SetLength(0);
+
+			}
+			catch (Exception ex)
+			{
+				throw new ApplicationException("File Error:" , ex );
+			}
+
+			byte[] inputByte = new byte[4096]; //Intermediate buffer.
+			long writtenLen = 0;               //Total number of written bytes.
+			int len; 
+
+			DES des = new DESCryptoServiceProvider();          
+			
+			
+			CryptoStream decStream = new CryptoStream(ifs, des.CreateDecryptor(pdb.GetBytes(des.KeySize/8),pdb.GetBytes(des.BlockSize/8))
+				, CryptoStreamMode.Read);
+			
+			
+
+			Console.WriteLine("Decryption in progress ...");
+
+			try
+			{
+				len = decStream.Read(inputByte, 0, 4096);
+				while(len!=0)
+				{
+					ofs.Write(inputByte, 0, len);
+					writtenLen += len;
+					len = decStream.Read(inputByte, 0, 4096);
+				}
+			}
+			catch (Exception ex)
+			{
+				throw new ApplicationException("Write Error(May be your password is incorrect)" , ex );
+			}
+
+			decStream.Close();  
+			ifs.Close();
+			ofs.Close();
+
+			Console.WriteLine("{0} bytes successfully processed", writtenLen);
+		
+		} // End of Decrypt
+	}
+}
